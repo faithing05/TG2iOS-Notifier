@@ -1,0 +1,8 @@
+telethon
+requests
+python-socks[asyncio]
+qrcode
+Pillow
+python-dotenv
+PyQt5
+PyInstaller
