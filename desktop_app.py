@@ -90,6 +90,9 @@ class BotBridge(QObject):
     def stop_monitoring(self) -> None:
         self.service.stop_monitoring()
 
+    def send_test_notification(self) -> None:
+        self.service.send_test_notification()
+
     def shutdown(self) -> None:
         self.service.shutdown()
 
@@ -150,12 +153,15 @@ class MainWindow(QMainWindow):
         self.save_button.clicked.connect(self.save_current_config)
         self.refresh_button = QPushButton("Проверить авторизацию")
         self.refresh_button.clicked.connect(self.bridge.refresh_authorization)
+        self.test_button = QPushButton("Тест Discord")
+        self.test_button.clicked.connect(self.send_test_notification)
         self.start_button = QPushButton("Старт")
         self.start_button.clicked.connect(self.start_monitoring)
         self.stop_button = QPushButton("Стоп")
         self.stop_button.clicked.connect(self.bridge.stop_monitoring)
         controls_layout.addWidget(self.save_button)
         controls_layout.addWidget(self.refresh_button)
+        controls_layout.addWidget(self.test_button)
         controls_layout.addStretch(1)
         controls_layout.addWidget(self.start_button)
         controls_layout.addWidget(self.stop_button)
@@ -363,6 +369,10 @@ class MainWindow(QMainWindow):
     def start_monitoring(self) -> None:
         if self.save_current_config():
             self.bridge.start_monitoring()
+
+    def send_test_notification(self) -> None:
+        if self.save_current_config():
+            self.bridge.send_test_notification()
 
     def on_status_changed(self, message: str) -> None:
         self.status_label.setText(f"Статус: {message}")

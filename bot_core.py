@@ -218,6 +218,9 @@ class TelegramDiscordNotifierService:
     def stop_monitoring(self) -> None:
         self._schedule(self._stop_monitoring_async())
 
+    def send_test_notification(self) -> None:
+        self._schedule(self._send_test_notification_async())
+
     def update_config(self, config: AppConfig) -> None:
         self.config = config
         self.logger.info("Конфигурация приложения обновлена")
@@ -531,6 +534,14 @@ class TelegramDiscordNotifierService:
         self._auth_mode = "idle"
         self._emit_state(awaiting_code=False, awaiting_password=False, auth_mode="idle")
 
+    async def _send_test_notification_async(self) -> None:
+        if not self.config.discord_webhook_url:
+            self._emit_status("Сначала заполните Discord Webhook URL")
+            return
+
+        # Тестовое уведомление помогает быстро проверить пуши Discord без реального сообщения в Telegram.
+        self._send_discord_notification("Тестовый контакт Telegram", is_test=True)
+
     async def _handle_new_private_message(self, event) -> None:
         self.logger.debug(
             "Получено сообщение private=%s out=%s sender_id=%s",
@@ -562,10 +573,12 @@ class TelegramDiscordNotifierService:
         )
         self._send_discord_notification(contact_name)
 
-    def _send_discord_notification(self, contact_name: str) -> None:
-        payload = {
-            "content": f"🔔 **Telegram**: новое сообщение от контакта: **{contact_name}**",
-        }
+    def _send_discord_notification(self, contact_name: str, is_test: bool = False) -> None:
+        content = f"🔔 **Telegram**: новое сообщение от контакта: **{contact_name}**"
+        if is_test:
+            content += "\n_Это тестовое уведомление._"
+
+        payload = {"content": content}
 
         try:
             response = requests.post(
@@ -577,6 +590,11 @@ class TelegramDiscordNotifierService:
         except requests.RequestException as error:
             self.logger.error("Ошибка сети при отправке в Discord: %s", error)
             self._emit_status(f"Ошибка сети при отправке в Discord: {error}")
+            return
+
+        if is_test:
+            self.logger.info("Тестовое уведомление в Discord отправлено")
+            self._emit_status("Тестовое уведомление в Discord отправлено")
             return
 
         self.logger.info("Уведомление в Discord отправлено для контакта: %s", contact_name)
