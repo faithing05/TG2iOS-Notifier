@@ -1,10 +1,10 @@
 import os
 
 import requests
+from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
 from telethon.tl import types
-from dotenv import load_dotenv
 
 try:
     import qrcode
@@ -19,8 +19,7 @@ load_dotenv()
 # Пример значений смотрите в файле .env.example
 API_ID = os.getenv("TG_API_ID")
 API_HASH = os.getenv("TG_API_HASH")
-VK_TOKEN = os.getenv("VK_TOKEN")
-VK_USER_ID = os.getenv("VK_USER_ID")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 AUTH_MODE = os.getenv("TG_AUTH_MODE", "phone").strip().lower()
 DEBUG_LOG = os.getenv("DEBUG_LOG", "1").strip() == "1"
 
@@ -31,15 +30,13 @@ SESSION_NAME = "tg_userbot_session"
 CONNECT_TIMEOUT = 30
 CONNECTION_RETRIES = 10
 RETRY_DELAY = 5
+DISCORD_REQUEST_TIMEOUT = 15
 
 # Если нужен SOCKS5-прокси, задайте переменные окружения.
 PROXY_HOST = os.getenv("PROXY_HOST")
 PROXY_PORT = os.getenv("PROXY_PORT")
 PROXY_USERNAME = os.getenv("PROXY_USERNAME")
 PROXY_PASSWORD = os.getenv("PROXY_PASSWORD")
-
-VK_API_URL = "https://api.vk.com/method/messages.send"
-VK_API_VERSION = "5.131"
 
 MEDIA_TYPE_LABELS = (
     (types.MessageMediaGeoLive, "геопозиция"),
@@ -93,10 +90,8 @@ def validate_config() -> bool:
         missing_vars.append("TG_API_ID")
     if not API_HASH:
         missing_vars.append("TG_API_HASH")
-    if not VK_TOKEN:
-        missing_vars.append("VK_TOKEN")
-    if not VK_USER_ID:
-        missing_vars.append("VK_USER_ID")
+    if not DISCORD_WEBHOOK_URL:
+        missing_vars.append("DISCORD_WEBHOOK_URL")
 
     if missing_vars:
         print("Не заданы обязательные переменные окружения:")
@@ -214,36 +209,20 @@ def build_message_content(message) -> str:
     return "[Сообщение без текста]"
 
 
-def send_vk_notification(contact_name: str, message_content: str, quote_message: bool) -> None:
-    """Отправляет уведомление в личные сообщения VK."""
-    if quote_message:
-        message_text = f'{contact_name}\n"{message_content}"'
-    else:
-        message_text = f'{contact_name}\n{message_content}'
+def send_discord_notification(contact_name: str) -> None:
+    """Отправляет уведомление в Discord через webhook."""
     payload = {
-        "access_token": VK_TOKEN,
-        "v": VK_API_VERSION,
-        "user_id": VK_USER_ID,
-        "random_id": 0,
-        "message": message_text,
+        "content": f"🔔 **Telegram**: новое сообщение от контакта: **{contact_name}**",
     }
 
     try:
-        response = requests.post(VK_API_URL, data=payload, timeout=15)
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=DISCORD_REQUEST_TIMEOUT)
         response.raise_for_status()
-        data = response.json()
     except requests.RequestException as error:
-        print(f"Ошибка сети при отправке уведомления в VK: {error}")
-        return
-    except ValueError as error:
-        print(f"Не удалось разобрать ответ VK API: {error}")
+        print(f"Ошибка сети при отправке уведомления в Discord: {error}")
         return
 
-    if "error" in data:
-        print(f"VK API вернул ошибку: {data['error']}")
-        return
-
-    print(f"Уведомление в VK отправлено для контакта: {contact_name}")
+    print(f"Уведомление в Discord отправлено для контакта: {contact_name}")
 
 
 async def handle_new_private_message(event) -> None:
@@ -281,9 +260,8 @@ async def handle_new_private_message(event) -> None:
         return
 
     message_content = build_message_content(event.message)
-    quote_message = not bool((event.message.raw_text or "").strip())
-    log_debug(f"Отправитель прошел фильтр контактов: {contact_name}")
-    send_vk_notification(contact_name, message_content, quote_message)
+    log_debug(f"Новое сообщение от контакта {contact_name}: {message_content}")
+    send_discord_notification(contact_name)
 
 
 def authorize_with_phone() -> None:
@@ -325,7 +303,7 @@ def main() -> None:
         return
 
     client = build_telegram_client()
-    client.add_event_handler(handle_new_private_message, events.NewMessage())
+    client.add_event_handler(handle_new_private_message, events.NewMessage(incoming=True))
     print("Запуск Telegram userbot...")
     if AUTH_MODE == "qr":
         print("Выбран вход через QR без SMS.")

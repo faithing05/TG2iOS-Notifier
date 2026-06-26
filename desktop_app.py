@@ -29,10 +29,10 @@ from PyQt5.QtWidgets import (
 )
 
 from app_config import AppConfig, get_app_paths, load_config, save_config, validate_config
-from bot_core import LOGGER_NAME, TelegramVkNotifierService, setup_logging
+from bot_core import LOGGER_NAME, TelegramDiscordNotifierService, setup_logging
 
 
-APP_TITLE = "Telegram to VK Notifier"
+APP_TITLE = "Telegram to Discord Notifier"
 BASE_DIR = Path(__file__).resolve().parent
 
 
@@ -57,7 +57,7 @@ class BotBridge(QObject):
 
     def __init__(self, config: AppConfig, paths) -> None:
         super().__init__()
-        self.service = TelegramVkNotifierService(
+        self.service = TelegramDiscordNotifierService(
             config=config,
             paths=paths,
             on_status=self.status_changed.emit,
@@ -168,18 +168,15 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        api_group = QGroupBox("Telegram и VK")
+        api_group = QGroupBox("Telegram и Discord")
         api_form = QFormLayout(api_group)
         self.tg_api_id_input = QLineEdit()
         self.tg_api_hash_input = QLineEdit()
-        self.vk_token_input = QLineEdit()
-        self.vk_token_input.setEchoMode(QLineEdit.Password)
-        self.vk_user_id_input = QLineEdit()
+        self.discord_webhook_url_input = QLineEdit()
         self.session_name_input = QLineEdit()
         api_form.addRow("TG API ID", self.tg_api_id_input)
         api_form.addRow("TG API Hash", self.tg_api_hash_input)
-        api_form.addRow("VK Token", self.vk_token_input)
-        api_form.addRow("VK User ID", self.vk_user_id_input)
+        api_form.addRow("Discord Webhook URL", self.discord_webhook_url_input)
         api_form.addRow("Session Name", self.session_name_input)
 
         proxy_group = QGroupBox("SOCKS5 proxy")
@@ -197,11 +194,7 @@ class MainWindow(QMainWindow):
         misc_group = QGroupBox("Прочее")
         misc_layout = QVBoxLayout(misc_group)
         self.debug_log_checkbox = QCheckBox("Подробные логи")
-        self.delete_vk_on_read_checkbox = QCheckBox(
-            "Удалять уведомления в VK после прочтения в Telegram"
-        )
         misc_layout.addWidget(self.debug_log_checkbox)
-        misc_layout.addWidget(self.delete_vk_on_read_checkbox)
         self.config_hint_label = QLabel(
             f"Настройки сохраняются в: {self.paths.config_path}\n"
             f"Лог-файл: {self.log_path}\n"
@@ -314,9 +307,7 @@ class MainWindow(QMainWindow):
         return AppConfig(
             tg_api_id=self.tg_api_id_input.text().strip(),
             tg_api_hash=self.tg_api_hash_input.text().strip(),
-            vk_token=self.vk_token_input.text().strip(),
-            vk_user_id=self.vk_user_id_input.text().strip(),
-            delete_vk_on_read=self.delete_vk_on_read_checkbox.isChecked(),
+            discord_webhook_url=self.discord_webhook_url_input.text().strip(),
             proxy_host=self.proxy_host_input.text().strip(),
             proxy_port=self.proxy_port_input.text().strip(),
             proxy_username=self.proxy_username_input.text().strip(),
@@ -328,9 +319,7 @@ class MainWindow(QMainWindow):
     def load_form_from_config(self) -> None:
         self.tg_api_id_input.setText(self.config.tg_api_id)
         self.tg_api_hash_input.setText(self.config.tg_api_hash)
-        self.vk_token_input.setText(self.config.vk_token)
-        self.vk_user_id_input.setText(self.config.vk_user_id)
-        self.delete_vk_on_read_checkbox.setChecked(self.config.delete_vk_on_read)
+        self.discord_webhook_url_input.setText(self.config.discord_webhook_url)
         self.proxy_host_input.setText(self.config.proxy_host)
         self.proxy_port_input.setText(self.config.proxy_port)
         self.proxy_username_input.setText(self.config.proxy_username)

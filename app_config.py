@@ -10,9 +10,7 @@ from dotenv import load_dotenv
 class AppConfig:
     tg_api_id: str = ""
     tg_api_hash: str = ""
-    vk_token: str = ""
-    vk_user_id: str = ""
-    delete_vk_on_read: bool = False
+    discord_webhook_url: str = ""
     proxy_host: str = ""
     proxy_port: str = ""
     proxy_username: str = ""
@@ -25,10 +23,12 @@ class AppConfig:
 class AppPaths:
     app_dir: Path
     config_path: Path
-    message_links_path: Path
     logs_dir: Path
     log_path: Path
     session_dir: Path
+    legacy_app_dir: Path
+    legacy_app_config_path: Path
+    legacy_session_dir_in_appdata: Path
     legacy_config_path: Path
     legacy_env_path: Path
     legacy_session_dir: Path
@@ -42,14 +42,17 @@ def _normalize_string(value: object) -> str:
 
 def get_app_paths(base_dir: Path) -> AppPaths:
     appdata_root = Path(os.getenv("APPDATA") or (Path.home() / "AppData" / "Roaming"))
-    app_dir = appdata_root / "TgVkNotifier"
+    app_dir = appdata_root / "TgDsNotifier"
+    legacy_app_dir = appdata_root / "TgVkNotifier"
     return AppPaths(
         app_dir=app_dir,
         config_path=app_dir / "app_config.json",
-        message_links_path=app_dir / "message_links.json",
         logs_dir=app_dir / "logs",
         log_path=app_dir / "logs" / "app.log",
         session_dir=app_dir / "session",
+        legacy_app_dir=legacy_app_dir,
+        legacy_app_config_path=legacy_app_dir / "app_config.json",
+        legacy_session_dir_in_appdata=legacy_app_dir / "session",
         legacy_config_path=base_dir / "app_config.json",
         legacy_env_path=base_dir / ".env",
         legacy_session_dir=base_dir,
@@ -60,9 +63,7 @@ def _build_config(data: dict) -> AppConfig:
     return AppConfig(
         tg_api_id=_normalize_string(data.get("tg_api_id")),
         tg_api_hash=_normalize_string(data.get("tg_api_hash")),
-        vk_token=_normalize_string(data.get("vk_token")),
-        vk_user_id=_normalize_string(data.get("vk_user_id")),
-        delete_vk_on_read=bool(data.get("delete_vk_on_read", False)),
+        discord_webhook_url=_normalize_string(data.get("discord_webhook_url")),
         proxy_host=_normalize_string(data.get("proxy_host")),
         proxy_port=_normalize_string(data.get("proxy_port")),
         proxy_username=_normalize_string(data.get("proxy_username")),
@@ -82,6 +83,13 @@ def load_config(paths: AppPaths) -> AppConfig:
 
         return _build_config(data)
 
+    if paths.legacy_app_config_path.exists():
+        try:
+            data = json.loads(paths.legacy_app_config_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        return _build_config(data)
+
     if paths.legacy_config_path.exists():
         try:
             data = json.loads(paths.legacy_config_path.read_text(encoding="utf-8"))
@@ -93,9 +101,7 @@ def load_config(paths: AppPaths) -> AppConfig:
     return AppConfig(
         tg_api_id=_normalize_string(os.getenv("TG_API_ID")),
         tg_api_hash=_normalize_string(os.getenv("TG_API_HASH")),
-        vk_token=_normalize_string(os.getenv("VK_TOKEN")),
-        vk_user_id=_normalize_string(os.getenv("VK_USER_ID")),
-        delete_vk_on_read=_normalize_string(os.getenv("DELETE_VK_ON_READ", "0")) == "1",
+        discord_webhook_url=_normalize_string(os.getenv("DISCORD_WEBHOOK_URL")),
         proxy_host=_normalize_string(os.getenv("PROXY_HOST")),
         proxy_port=_normalize_string(os.getenv("PROXY_PORT")),
         proxy_username=_normalize_string(os.getenv("PROXY_USERNAME")),
@@ -129,13 +135,24 @@ def migrate_legacy_session_if_needed(paths: AppPaths, session_name: str) -> Path
     if target_session.exists() or target_journal.exists():
         return target
 
-    legacy = paths.legacy_session_dir / (session_name or "tg_userbot_session")
-    legacy_session = legacy.with_suffix(".session")
-    legacy_journal = legacy.with_suffix(".session-journal")
+    legacy_sources = [
+        paths.legacy_session_dir_in_appdata / (session_name or "tg_userbot_session"),
+        paths.legacy_session_dir / (session_name or "tg_userbot_session"),
+    ]
 
-    if legacy_session.exists():
+    legacy_session = None
+    legacy_journal = None
+    for legacy in legacy_sources:
+        candidate_session = legacy.with_suffix(".session")
+        candidate_journal = legacy.with_suffix(".session-journal")
+        if candidate_session.exists() or candidate_journal.exists():
+            legacy_session = candidate_session
+            legacy_journal = candidate_journal
+            break
+
+    if legacy_session is not None and legacy_session.exists():
         target_session.write_bytes(legacy_session.read_bytes())
-    if legacy_journal.exists():
+    if legacy_journal is not None and legacy_journal.exists():
         target_journal.write_bytes(legacy_journal.read_bytes())
 
     return target
@@ -148,10 +165,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("Не заполнено поле TG API ID.")
     if not config.tg_api_hash:
         errors.append("Не заполнено поле TG API Hash.")
-    if not config.vk_token:
-        errors.append("Не заполнено поле VK Token.")
-    if not config.vk_user_id:
-        errors.append("Не заполнено поле VK User ID.")
+    if not config.discord_webhook_url:
+        errors.append("Не заполнено поле Discord Webhook URL.")
 
     if config.tg_api_id:
         try:
