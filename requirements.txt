@@ -1,5 +1,7 @@
 telethon
 requests
+pywebpush
+cryptography
 python-socks[asyncio]
 qrcode
 Pillow

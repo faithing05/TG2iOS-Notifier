@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QTextEdit,
     QStyle,
     QSystemTrayIcon,
     QTabWidget,
@@ -28,11 +29,19 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from app_config import AppConfig, get_app_paths, load_config, save_config, validate_config
-from bot_core import LOGGER_NAME, TelegramDiscordNotifierService, setup_logging
+from app_config import (
+    AppConfig,
+    ensure_vapid_keys,
+    get_app_paths,
+    load_config,
+    parse_webpush_subscription,
+    save_config,
+    validate_config,
+)
+from bot_core import LOGGER_NAME, TelegramIosNotifierService, setup_logging
 
 
-APP_TITLE = "Telegram to Discord Notifier"
+APP_TITLE = "TG2iOS-Notifier"
 BASE_DIR = Path(__file__).resolve().parent
 
 
@@ -57,7 +66,7 @@ class BotBridge(QObject):
 
     def __init__(self, config: AppConfig, paths) -> None:
         super().__init__()
-        self.service = TelegramDiscordNotifierService(
+        self.service = TelegramIosNotifierService(
             config=config,
             paths=paths,
             on_status=self.status_changed.emit,
@@ -153,7 +162,7 @@ class MainWindow(QMainWindow):
         self.save_button.clicked.connect(self.save_current_config)
         self.refresh_button = QPushButton("Проверить авторизацию")
         self.refresh_button.clicked.connect(self.bridge.refresh_authorization)
-        self.test_button = QPushButton("Тест Discord")
+        self.test_button = QPushButton("Тест iOS WebPush")
         self.test_button.clicked.connect(self.send_test_notification)
         self.start_button = QPushButton("Старт")
         self.start_button.clicked.connect(self.start_monitoring)
@@ -174,16 +183,51 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        api_group = QGroupBox("Telegram и Discord")
+        api_group = QGroupBox("Telegram и iOS WebPush")
         api_form = QFormLayout(api_group)
         self.tg_api_id_input = QLineEdit()
         self.tg_api_hash_input = QLineEdit()
-        self.discord_webhook_url_input = QLineEdit()
         self.session_name_input = QLineEdit()
         api_form.addRow("TG API ID", self.tg_api_id_input)
         api_form.addRow("TG API Hash", self.tg_api_hash_input)
-        api_form.addRow("Discord Webhook URL", self.discord_webhook_url_input)
         api_form.addRow("Session Name", self.session_name_input)
+
+        webpush_group = QGroupBox("iOS WebPush")
+        webpush_layout = QVBoxLayout(webpush_group)
+
+        public_key_layout = QHBoxLayout()
+        self.vapid_public_key_input = QLineEdit()
+        self.vapid_public_key_input.setReadOnly(True)
+        self.copy_public_key_button = QPushButton("Скопировать")
+        self.copy_public_key_button.clicked.connect(self.copy_vapid_public_key)
+        public_key_layout.addWidget(self.vapid_public_key_input)
+        public_key_layout.addWidget(self.copy_public_key_button)
+
+        private_key_layout = QHBoxLayout()
+        self.vapid_private_key_input = QLineEdit()
+        self.vapid_private_key_input.setReadOnly(True)
+        self.regenerate_keys_button = QPushButton("Регенерировать ключи")
+        self.regenerate_keys_button.clicked.connect(self.regenerate_vapid_keys)
+        private_key_layout.addWidget(self.vapid_private_key_input)
+        private_key_layout.addWidget(self.regenerate_keys_button)
+
+        self.subscription_json_input = QTextEdit()
+        self.subscription_json_input.textChanged.connect(self.on_subscription_text_changed)
+        self.subscription_json_input.setPlaceholderText(
+            "Вставьте сюда subscription JSON, полученный на iPhone после нажатия Subscribe"
+        )
+        self.subscription_validation_label = QLabel(
+            "Subscription JSON можно оставить пустым до завершения привязки iPhone."
+        )
+        self.subscription_validation_label.setWordWrap(True)
+
+        webpush_layout.addWidget(QLabel("VAPID Public Key"))
+        webpush_layout.addLayout(public_key_layout)
+        webpush_layout.addWidget(QLabel("VAPID Private Key"))
+        webpush_layout.addLayout(private_key_layout)
+        webpush_layout.addWidget(QLabel("Subscription JSON"))
+        webpush_layout.addWidget(self.subscription_json_input)
+        webpush_layout.addWidget(self.subscription_validation_label)
 
         proxy_group = QGroupBox("SOCKS5 proxy")
         proxy_form = QFormLayout(proxy_group)
@@ -210,6 +254,7 @@ class MainWindow(QMainWindow):
         misc_layout.addWidget(self.config_hint_label)
 
         layout.addWidget(api_group)
+        layout.addWidget(webpush_group)
         layout.addWidget(proxy_group)
         layout.addWidget(misc_group)
         layout.addStretch(1)
@@ -313,7 +358,9 @@ class MainWindow(QMainWindow):
         return AppConfig(
             tg_api_id=self.tg_api_id_input.text().strip(),
             tg_api_hash=self.tg_api_hash_input.text().strip(),
-            discord_webhook_url=self.discord_webhook_url_input.text().strip(),
+            vapid_public_key=self.vapid_public_key_input.text().strip(),
+            vapid_private_key=self.vapid_private_key_input.text().strip(),
+            webpush_subscription=self.subscription_json_input.toPlainText().strip(),
             proxy_host=self.proxy_host_input.text().strip(),
             proxy_port=self.proxy_port_input.text().strip(),
             proxy_username=self.proxy_username_input.text().strip(),
@@ -325,13 +372,16 @@ class MainWindow(QMainWindow):
     def load_form_from_config(self) -> None:
         self.tg_api_id_input.setText(self.config.tg_api_id)
         self.tg_api_hash_input.setText(self.config.tg_api_hash)
-        self.discord_webhook_url_input.setText(self.config.discord_webhook_url)
+        self.vapid_public_key_input.setText(self.config.vapid_public_key)
+        self.vapid_private_key_input.setText(self.config.vapid_private_key)
+        self.subscription_json_input.setPlainText(self.config.webpush_subscription)
         self.proxy_host_input.setText(self.config.proxy_host)
         self.proxy_port_input.setText(self.config.proxy_port)
         self.proxy_username_input.setText(self.config.proxy_username)
         self.proxy_password_input.setText(self.config.proxy_password)
         self.debug_log_checkbox.setChecked(self.config.debug_log)
         self.session_name_input.setText(self.config.session_name)
+        self.validate_subscription_json()
 
     def save_current_config(self) -> bool:
         new_config = self.collect_form_config()
@@ -351,6 +401,48 @@ class MainWindow(QMainWindow):
             self.on_status_changed("Настройки сохранены")
 
         return True
+
+    def copy_vapid_public_key(self) -> None:
+        QApplication.clipboard().setText(self.vapid_public_key_input.text())
+        self.on_status_changed("VAPID Public Key скопирован в буфер обмена")
+
+    def regenerate_vapid_keys(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            APP_TITLE,
+            (
+                "Регенерация VAPID-ключей сделает текущий Subscription JSON недействительным.\n"
+                "Продолжить?"
+            ),
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        updated_config = self.collect_form_config()
+        updated_config.vapid_public_key = ""
+        updated_config.vapid_private_key = ""
+        updated_config.webpush_subscription = ""
+        updated_config, _ = ensure_vapid_keys(updated_config)
+        self.config = updated_config
+        save_config(self.paths, updated_config)
+        self.load_form_from_config()
+        self.bridge.update_config(updated_config)
+        self.on_status_changed("VAPID-ключи регенерированы. Подпишитесь на iPhone заново.")
+
+    def validate_subscription_json(self) -> None:
+        subscription_text = self.subscription_json_input.toPlainText().strip()
+        if not subscription_text:
+            self.subscription_validation_label.setText(
+                "Subscription JSON можно оставить пустым до завершения привязки iPhone."
+            )
+            return
+
+        _, error = parse_webpush_subscription(subscription_text)
+        if error:
+            self.subscription_validation_label.setText(error)
+            return
+
+        self.subscription_validation_label.setText("Subscription JSON выглядит корректно.")
 
     def begin_qr_login(self) -> None:
         if self.save_current_config():
@@ -373,6 +465,9 @@ class MainWindow(QMainWindow):
     def send_test_notification(self) -> None:
         if self.save_current_config():
             self.bridge.send_test_notification()
+
+    def on_subscription_text_changed(self) -> None:
+        self.validate_subscription_json()
 
     def on_status_changed(self, message: str) -> None:
         self.status_label.setText(f"Статус: {message}")

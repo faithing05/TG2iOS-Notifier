@@ -1,11 +1,12 @@
 import asyncio
+import json
 import logging
 import threading
 from concurrent.futures import Future
 from pathlib import Path
 from typing import Callable
 
-import requests
+from pywebpush import WebPushException, webpush
 from telethon import TelegramClient, events
 from telethon.errors import (
     PasswordHashInvalidError,
@@ -15,14 +16,14 @@ from telethon.errors import (
 )
 from telethon.tl import types
 
-from app_config import AppConfig, AppPaths, migrate_legacy_session_if_needed
+from app_config import AppConfig, AppPaths, migrate_legacy_session_if_needed, parse_webpush_subscription
 
 
 LOGGER_NAME = "tg_notifier"
-DISCORD_REQUEST_TIMEOUT = 15
 CONNECT_TIMEOUT = 30
 CONNECTION_RETRIES = 10
 RETRY_DELAY = 5
+VAPID_SUBJECT = "mailto:admin@example.com"
 
 MEDIA_TYPE_LABELS = (
     (types.MessageMediaGeoLive, "геопозиция"),
@@ -148,7 +149,49 @@ def build_message_content(message) -> str:
     return "[Сообщение без текста]"
 
 
-class TelegramDiscordNotifierService:
+def build_webpush_payload(contact_name: str, message_content: str, is_test: bool = False) -> str:
+    body = f"Сообщение от: {contact_name}"
+    title = "Telegram"
+    if is_test:
+        title = "TG2iOS"
+        body = "Тестовое push-уведомление из TG2iOS-Notifier"
+
+    payload = {
+        "title": title,
+        "body": body,
+        "tag": "tg2ios-notifier",
+        "data": {
+            "sender_name": contact_name,
+            "message": message_content,
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def send_webpush_notification(
+    config: AppConfig,
+    contact_name: str,
+    message_content: str,
+    *,
+    is_test: bool = False,
+) -> None:
+    subscription_data, subscription_error = parse_webpush_subscription(config.webpush_subscription)
+    if subscription_error:
+        raise ValueError(subscription_error)
+    if subscription_data is None:
+        raise ValueError("Не задан Subscription JSON для iOS WebPush.")
+    if not config.vapid_private_key:
+        raise ValueError("Не задан приватный VAPID-ключ.")
+
+    webpush(
+        subscription_info=subscription_data,
+        data=build_webpush_payload(contact_name, message_content, is_test=is_test),
+        vapid_private_key=config.vapid_private_key,
+        vapid_claims={"sub": VAPID_SUBJECT},
+    )
+
+
+class TelegramIosNotifierService:
     def __init__(
         self,
         config: AppConfig,
@@ -251,7 +294,7 @@ class TelegramDiscordNotifierService:
 
     async def _create_client_async(self) -> None:
         if not self._has_usable_config():
-            self._emit_status("Заполните настройки Telegram и Discord перед запуском")
+            self._emit_status("Заполните настройки Telegram перед запуском")
             return
 
         self._client = self._build_client()
@@ -322,7 +365,7 @@ class TelegramDiscordNotifierService:
             await self._client.connect()
 
     def _has_usable_config(self) -> bool:
-        if not all([self.config.tg_api_id, self.config.tg_api_hash, self.config.discord_webhook_url]):
+        if not all([self.config.tg_api_id, self.config.tg_api_hash]):
             return False
 
         try:
@@ -338,7 +381,6 @@ class TelegramDiscordNotifierService:
         return (
             self.config.tg_api_id,
             self.config.tg_api_hash,
-            self.config.discord_webhook_url,
             self.config.proxy_host,
             self.config.proxy_port,
             self.config.proxy_username,
@@ -350,7 +392,7 @@ class TelegramDiscordNotifierService:
         if not self._has_usable_config():
             self._authorized_user = ""
             self._emit_state(authorized=False, authorized_user="", running=False)
-            self._emit_status("Заполните настройки Telegram и Discord перед авторизацией")
+            self._emit_status("Заполните настройки Telegram перед авторизацией")
             return
 
         try:
@@ -481,6 +523,10 @@ class TelegramDiscordNotifierService:
             self._emit_status(f"Не удалось авторизоваться по паролю: {error}")
 
     async def _start_monitoring_async(self) -> None:
+        if not self._has_push_configuration():
+            self._emit_status("Сначала сохраните VAPID-ключи и корректный Subscription JSON")
+            return
+
         try:
             await self._connect_if_needed()
             assert self._client is not None
@@ -535,12 +581,32 @@ class TelegramDiscordNotifierService:
         self._emit_state(awaiting_code=False, awaiting_password=False, auth_mode="idle")
 
     async def _send_test_notification_async(self) -> None:
-        if not self.config.discord_webhook_url:
-            self._emit_status("Сначала заполните Discord Webhook URL")
+        if not self._has_push_configuration():
+            self._emit_status("Сначала сохраните корректный Subscription JSON для iPhone")
             return
 
-        # Тестовое уведомление помогает быстро проверить пуши Discord без реального сообщения в Telegram.
-        self._send_discord_notification("Тестовый контакт Telegram", is_test=True)
+        try:
+            await asyncio.to_thread(
+                send_webpush_notification,
+                self.config,
+                "Тестовый контакт Telegram",
+                "Тестовое сообщение",
+                is_test=True,
+            )
+        except ValueError as error:
+            self._emit_status(str(error))
+            return
+        except WebPushException as error:
+            self.logger.error("Ошибка отправки WebPush: %s", error)
+            self._emit_status(f"Ошибка отправки WebPush: {error}")
+            return
+        except Exception as error:
+            self.logger.exception("Не удалось отправить тестовый WebPush")
+            self._emit_status(f"Не удалось отправить тестовый WebPush: {error}")
+            return
+
+        self.logger.info("Тестовое уведомление iOS WebPush отправлено")
+        self._emit_status("Тестовое уведомление iOS WebPush отправлено")
 
     async def _handle_new_private_message(self, event) -> None:
         self.logger.debug(
@@ -571,34 +637,34 @@ class TelegramDiscordNotifierService:
             contact_name,
             message_content,
         )
-        self._send_discord_notification(contact_name)
-
-    def _send_discord_notification(self, contact_name: str, is_test: bool = False) -> None:
-        content = f"🔔 **Telegram**: новое сообщение от контакта: **{contact_name}**"
-        if is_test:
-            content += "\n_Это тестовое уведомление._"
-
-        payload = {"content": content}
-
         try:
-            response = requests.post(
-                self.config.discord_webhook_url,
-                json=payload,
-                timeout=DISCORD_REQUEST_TIMEOUT,
+            await asyncio.to_thread(
+                send_webpush_notification,
+                self.config,
+                contact_name,
+                message_content,
             )
-            response.raise_for_status()
-        except requests.RequestException as error:
-            self.logger.error("Ошибка сети при отправке в Discord: %s", error)
-            self._emit_status(f"Ошибка сети при отправке в Discord: {error}")
+        except ValueError as error:
+            self.logger.warning("WebPush не отправлен: %s", error)
+            self._emit_status(str(error))
+            return
+        except WebPushException as error:
+            self.logger.error("Ошибка отправки WebPush для %s: %s", contact_name, error)
+            self._emit_status(f"Ошибка отправки WebPush: {error}")
+            return
+        except Exception as error:
+            self.logger.exception("Не удалось отправить WebPush")
+            self._emit_status(f"Не удалось отправить WebPush: {error}")
             return
 
-        if is_test:
-            self.logger.info("Тестовое уведомление в Discord отправлено")
-            self._emit_status("Тестовое уведомление в Discord отправлено")
-            return
-
-        self.logger.info("Уведомление в Discord отправлено для контакта: %s", contact_name)
+        self.logger.info("Уведомление iOS WebPush отправлено для контакта: %s", contact_name)
         self._emit_status(f"Уведомление отправлено для контакта: {contact_name}")
+
+    def _has_push_configuration(self) -> bool:
+        if not self.config.vapid_public_key or not self.config.vapid_private_key:
+            return False
+        subscription_data, subscription_error = parse_webpush_subscription(self.config.webpush_subscription)
+        return subscription_data is not None and subscription_error is None
 
     def _register_handlers(self) -> None:
         assert self._client is not None

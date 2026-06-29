@@ -1,0 +1,9 @@
+{
+  "name": "TG2iOS WebPush",
+  "short_name": "TG2iOS",
+  "display": "standalone",
+  "start_url": "./",
+  "scope": "./",
+  "background_color": "#f3f5fb",
+  "theme_color": "#2f6bff"
+}

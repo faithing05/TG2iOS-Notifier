@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>TG2iOS WebPush</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f3f5fb;
+            color: #182033;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 100%);
+            min-height: 100vh;
+        }
+
+        .shell {
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 20px 16px 32px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #dbe2f0;
+            border-radius: 18px;
+            box-shadow: 0 12px 40px rgba(37, 48, 83, 0.08);
+            padding: 18px;
+        }
+
+        h1 {
+            font-size: 28px;
+            margin: 0 0 8px;
+        }
+
+        p {
+            margin: 0 0 14px;
+            line-height: 1.45;
+            color: #4f5d7a;
+        }
+
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            margin: 16px 0 8px;
+        }
+
+        input,
+        textarea,
+        button {
+            width: 100%;
+            border-radius: 14px;
+            border: 1px solid #cfd8ea;
+            font: inherit;
+        }
+
+        input,
+        textarea {
+            padding: 12px 14px;
+            background: #fff;
+            color: #182033;
+        }
+
+        textarea {
+            min-height: 180px;
+            resize: vertical;
+        }
+
+        button {
+            padding: 13px 14px;
+            background: #2f6bff;
+            color: #fff;
+            font-weight: 600;
+            margin-top: 12px;
+        }
+
+        button.secondary {
+            background: #eaf0ff;
+            color: #2247a7;
+        }
+
+        button:disabled {
+            opacity: 0.55;
+        }
+
+        .hint,
+        .status {
+            font-size: 14px;
+        }
+
+        .status {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: #eef4ff;
+            color: #29416f;
+            display: none;
+        }
+
+        .status.error {
+            background: #fff1f2;
+            color: #9f1239;
+        }
+
+        .subscription-block {
+            display: none;
+            margin-top: 18px;
+        }
+
+        .footer-note {
+            margin-top: 18px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="card">
+            <h1>TG2iOS WebPush</h1>
+            <p>Добавьте страницу на экран "Домой", вставьте публичный VAPID-ключ из desktop-приложения и оформите подписку на push-уведомления.</p>
+
+            <div id="add-to-home-screen" class="status">
+                Для iOS WebPush откройте эту страницу как PWA: Safari -> Share -> Add to Home Screen.
+            </div>
+
+            <label for="vapid_public_key">VAPID Public Key</label>
+            <input id="vapid_public_key" type="text" placeholder="Вставьте публичный ключ из TG2iOS-Notifier">
+
+            <button id="subscribe_btn" type="button">Subscribe</button>
+
+            <div id="status" class="status"></div>
+
+            <div id="subscription_block" class="subscription-block">
+                <label for="subscription_output">Subscription JSON</label>
+                <textarea id="subscription_output" readonly></textarea>
+                <button id="copy_btn" class="secondary" type="button">Copy to Clipboard</button>
+            </div>
+
+            <div class="footer-note">После подписки скопируйте JSON и вставьте его в desktop-приложение в поле Subscription JSON.</div>
+        </div>
+    </div>
+
+    <script src="frontend.js"></script>
+</body>
+</html>
