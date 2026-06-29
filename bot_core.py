@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import socket
 import threading
 from concurrent.futures import Future
 from pathlib import Path
@@ -147,6 +148,22 @@ def build_message_content(message) -> str:
         return "служебное сообщение"
 
     return "[Сообщение без текста]"
+
+
+def describe_error(error: Exception) -> str:
+    message = str(error).strip()
+
+    if isinstance(error, asyncio.TimeoutError):
+        return "таймаут соединения с Telegram. Проверьте интернет, прокси и повторите попытку"
+
+    if isinstance(error, (ConnectionError, OSError, socket.gaierror)):
+        details = message or getattr(error, "strerror", "") or type(error).__name__
+        return f"сетевая ошибка: {details}. Проверьте интернет и настройки прокси"
+
+    if message:
+        return message
+
+    return f"{type(error).__name__} без текста ошибки"
 
 
 def build_webpush_payload(contact_name: str, message_content: str, is_test: bool = False) -> str:
@@ -410,7 +427,7 @@ class TelegramIosNotifierService:
                 self._emit_status("Telegram еще не авторизован")
         except Exception as error:
             self.logger.exception("Ошибка при проверке авторизации")
-            self._emit_status(f"Ошибка проверки авторизации: {error}")
+            self._emit_status(f"Ошибка проверки авторизации: {describe_error(error)}")
 
     async def _begin_qr_login_async(self) -> None:
         try:
@@ -435,7 +452,7 @@ class TelegramIosNotifierService:
             self._pending_qr_task = asyncio.create_task(self._wait_for_qr_login())
         except Exception as error:
             self.logger.exception("Ошибка запуска QR авторизации")
-            self._emit_status(f"Ошибка запуска QR: {error}")
+            self._emit_status(f"Ошибка запуска QR: {describe_error(error)}")
 
     async def _wait_for_qr_login(self) -> None:
         try:
@@ -453,7 +470,7 @@ class TelegramIosNotifierService:
             pass
         except Exception as error:
             self.logger.exception("Ошибка ожидания QR авторизации")
-            self._emit_status(f"Ошибка QR-авторизации: {error}")
+            self._emit_status(f"Ошибка QR-авторизации: {describe_error(error)}")
 
     async def _send_phone_code_async(self, phone_number: str) -> None:
         if not phone_number:
@@ -473,7 +490,7 @@ class TelegramIosNotifierService:
             self._emit_status("Код подтверждения отправлен в Telegram")
         except Exception as error:
             self.logger.exception("Ошибка отправки кода авторизации")
-            self._emit_status(f"Не удалось отправить код: {error}")
+            self._emit_status(f"Не удалось отправить код: {describe_error(error)}")
 
     async def _submit_code_async(self, code: str) -> None:
         if not self._pending_phone:
@@ -502,7 +519,7 @@ class TelegramIosNotifierService:
             self._emit_status("Срок действия кода истек. Запросите новый код.")
         except Exception as error:
             self.logger.exception("Ошибка подтверждения кода")
-            self._emit_status(f"Не удалось подтвердить код: {error}")
+            self._emit_status(f"Не удалось подтвердить код: {describe_error(error)}")
 
     async def _submit_password_async(self, password: str) -> None:
         if not password:
@@ -520,7 +537,7 @@ class TelegramIosNotifierService:
             self._emit_status("Неверный пароль двухэтапной аутентификации")
         except Exception as error:
             self.logger.exception("Ошибка ввода пароля")
-            self._emit_status(f"Не удалось авторизоваться по паролю: {error}")
+            self._emit_status(f"Не удалось авторизоваться по паролю: {describe_error(error)}")
 
     async def _start_monitoring_async(self) -> None:
         if not self._has_push_configuration():
@@ -544,7 +561,7 @@ class TelegramIosNotifierService:
             self._emit_status("Мониторинг Telegram включен")
         except Exception as error:
             self.logger.exception("Ошибка запуска мониторинга")
-            self._emit_status(f"Не удалось запустить мониторинг: {error}")
+            self._emit_status(f"Не удалось запустить мониторинг: {describe_error(error)}")
 
     async def _stop_monitoring_async(self) -> None:
         try:

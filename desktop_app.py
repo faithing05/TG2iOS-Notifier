@@ -276,6 +276,7 @@ class MainWindow(QMainWindow):
         self.qr_button.clicked.connect(self.begin_qr_login)
         self.qr_label = QLabel("QR еще не создан")
         self.qr_label.setAlignment(Qt.AlignCenter)
+        self.qr_label.setWordWrap(True)
         self.qr_label.setMinimumHeight(320)
         self.qr_label.setStyleSheet("border: 1px solid #999; background: white;")
         qr_layout.addWidget(self.qr_button)
@@ -446,6 +447,8 @@ class MainWindow(QMainWindow):
 
     def begin_qr_login(self) -> None:
         if self.save_current_config():
+            self.qr_label.clear()
+            self.qr_label.setText("Создание QR-кода...")
             self.bridge.begin_qr_login()
 
     def send_phone_code(self) -> None:
@@ -471,6 +474,9 @@ class MainWindow(QMainWindow):
 
     def on_status_changed(self, message: str) -> None:
         self.status_label.setText(f"Статус: {message}")
+        if message.startswith("Ошибка запуска QR:") or message.startswith("Ошибка QR-авторизации:"):
+            self.qr_label.clear()
+            self.qr_label.setText(message)
         if self.tray_icon is not None:
             self.tray_icon.setToolTip(f"{APP_TITLE}\n{message}")
 
@@ -487,6 +493,7 @@ class MainWindow(QMainWindow):
         image.save(buffer, format="PNG")
         pixmap = QPixmap()
         pixmap.loadFromData(buffer.getvalue(), "PNG")
+        self.qr_label.clear()
         self.qr_label.setPixmap(pixmap.scaled(280, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def _apply_state(self) -> None:

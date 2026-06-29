@@ -87,10 +87,12 @@ python tg_to_ios_userbot.py
 build_app.bat
 ```
 
+Скрипт делает релизную `onefile`-сборку и кладет итоговый файл в `dist\TgIosNotifier.exe`.
+
 Если нужно собрать вручную:
 
 ```bash
-pyinstaller --noconsole --name TgIosNotifier desktop_app.py
+pyinstaller --clean --onefile --noconsole --name TgIosNotifier desktop_app.py
 ```
 
 ## Хранение файлов
