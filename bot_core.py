@@ -150,6 +150,19 @@ def build_message_content(message) -> str:
     return "[Сообщение без текста]"
 
 
+def build_chat_tag(chat_id: int | None) -> str:
+    if chat_id is None:
+        return "tg2ios-chat-unknown"
+    return f"tg2ios-chat-{chat_id}"
+
+
+def build_notification_tag(chat_id: int | None, message_id: int | None = None) -> str:
+    chat_tag = build_chat_tag(chat_id)
+    if message_id is None:
+        return chat_tag
+    return f"{chat_tag}-msg-{message_id}"
+
+
 def describe_error(error: Exception) -> str:
     message = str(error).strip()
 
@@ -166,22 +179,47 @@ def describe_error(error: Exception) -> str:
     return f"{type(error).__name__} без текста ошибки"
 
 
-def build_webpush_payload(contact_name: str, message_content: str, is_test: bool = False) -> str:
+def build_webpush_payload(
+    contact_name: str,
+    message_content: str,
+    *,
+    chat_id: int | None = None,
+    message_id: int | None = None,
+    is_test: bool = False,
+) -> str:
+    chat_tag = build_chat_tag(chat_id)
     title = contact_name
     body = message_content
+    tag = build_notification_tag(chat_id, message_id)
     if is_test:
         title = "TG2iOS"
         body = "Тестовое push-уведомление из TG2iOS-Notifier"
+        chat_tag = "tg2ios-test"
+        tag = "tg2ios-test"
 
     payload = {
+        "action": "show",
         "title": title,
         "body": body,
         "icon": "./telegram-icon.svg",
         "badge": "./telegram-icon.svg",
-        "tag": "tg2ios-notifier",
+        "tag": tag,
         "data": {
             "sender_name": contact_name,
             "message": message_content,
+            "chat_tag": chat_tag,
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def build_webpush_clear_payload(chat_id: int) -> str:
+    chat_tag = build_chat_tag(chat_id)
+    payload = {
+        "action": "clear",
+        "tag": chat_tag,
+        "data": {
+            "chat_tag": chat_tag,
         },
     }
     return json.dumps(payload, ensure_ascii=False)
@@ -192,6 +230,8 @@ def send_webpush_notification(
     contact_name: str,
     message_content: str,
     *,
+    chat_id: int | None = None,
+    message_id: int | None = None,
     is_test: bool = False,
 ) -> None:
     subscription_data, subscription_error = parse_webpush_subscription(config.webpush_subscription)
@@ -204,7 +244,30 @@ def send_webpush_notification(
 
     webpush(
         subscription_info=subscription_data,
-        data=build_webpush_payload(contact_name, message_content, is_test=is_test),
+        data=build_webpush_payload(
+            contact_name,
+            message_content,
+            chat_id=chat_id,
+            message_id=message_id,
+            is_test=is_test,
+        ),
+        vapid_private_key=config.vapid_private_key,
+        vapid_claims={"sub": VAPID_SUBJECT},
+    )
+
+
+def send_webpush_clear_notification(config: AppConfig, chat_id: int) -> None:
+    subscription_data, subscription_error = parse_webpush_subscription(config.webpush_subscription)
+    if subscription_error:
+        raise ValueError(subscription_error)
+    if subscription_data is None:
+        raise ValueError("Не задан Subscription JSON для iOS WebPush.")
+    if not config.vapid_private_key:
+        raise ValueError("Не задан приватный VAPID-ключ.")
+
+    webpush(
+        subscription_info=subscription_data,
+        data=build_webpush_clear_payload(chat_id),
         vapid_private_key=config.vapid_private_key,
         vapid_claims={"sub": VAPID_SUBJECT},
     )
@@ -662,6 +725,8 @@ class TelegramIosNotifierService:
                 self.config,
                 contact_name,
                 message_content,
+                chat_id=event.chat_id,
+                message_id=event.message.id,
             )
         except ValueError as error:
             self.logger.warning("WebPush не отправлен: %s", error)
@@ -679,6 +744,30 @@ class TelegramIosNotifierService:
         self.logger.info("Уведомление iOS WebPush отправлено для контакта: %s", contact_name)
         self._emit_status(f"Уведомление отправлено для контакта: {contact_name}")
 
+    async def _handle_message_read(self, event) -> None:
+        if getattr(event, "outbox", False):
+            return
+
+        chat_id = getattr(event, "chat_id", None)
+        if chat_id is None:
+            self.logger.debug("Пропущено событие прочтения без chat_id")
+            return
+
+        chat = await event.get_chat()
+        if not isinstance(chat, types.User):
+            return
+
+        contact_name = build_contact_name(chat)
+        self.logger.info("Сообщения прочитаны в чате %s до max_id=%s", contact_name, event.max_id)
+        try:
+            await asyncio.to_thread(send_webpush_clear_notification, self.config, chat_id)
+        except ValueError as error:
+            self.logger.warning("Clear WebPush не отправлен: %s", error)
+        except WebPushException as error:
+            self.logger.error("Ошибка отправки clear WebPush для %s: %s", contact_name, error)
+        except Exception:
+            self.logger.exception("Не удалось отправить clear WebPush")
+
     def _has_push_configuration(self) -> bool:
         if not self.config.vapid_public_key or not self.config.vapid_private_key:
             return False
@@ -691,11 +780,16 @@ class TelegramIosNotifierService:
             self._handle_new_private_message,
             events.NewMessage(incoming=True),
         )
+        self._client.add_event_handler(
+            self._handle_message_read,
+            events.MessageRead(inbox=True),
+        )
 
     def _unregister_handlers(self) -> None:
         if self._client is None:
             return
         self._client.remove_event_handler(self._handle_new_private_message)
+        self._client.remove_event_handler(self._handle_message_read)
 
     def _emit_status(self, message: str) -> None:
         self.logger.info(message)

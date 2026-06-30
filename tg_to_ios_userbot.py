@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
+from telethon.tl import types
 
 try:
     import qrcode
@@ -19,6 +20,7 @@ from bot_core import (
     RETRY_DELAY,
     build_contact_name,
     build_message_content,
+    send_webpush_clear_notification,
     send_webpush_notification,
 )
 
@@ -116,10 +118,32 @@ async def main() -> None:
         print(f"Новое сообщение от {contact_name}: {message_content}")
 
         try:
-            await asyncio.to_thread(send_webpush_notification, config, contact_name, message_content)
+            await asyncio.to_thread(
+                send_webpush_notification,
+                config,
+                contact_name,
+                message_content,
+                chat_id=event.chat_id,
+                message_id=event.message.id,
+            )
             print(f"WebPush отправлен для контакта: {contact_name}")
         except Exception as error:
             print(f"Не удалось отправить WebPush: {error}")
+
+    @client.on(events.MessageRead(inbox=True))
+    async def handle_message_read(event) -> None:
+        if getattr(event, "outbox", False) or event.chat_id is None:
+            return
+
+        chat = await event.get_chat()
+        if not isinstance(chat, types.User):
+            return
+
+        try:
+            await asyncio.to_thread(send_webpush_clear_notification, config, event.chat_id)
+            print(f"Clear WebPush отправлен для чата: {build_contact_name(chat)}")
+        except Exception as error:
+            print(f"Не удалось отправить clear WebPush: {error}")
 
     if AUTH_MODE == "qr":
         await authorize_with_qr(client)
