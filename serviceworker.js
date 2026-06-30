@@ -6,10 +6,18 @@ self.addEventListener('push', (event) => {
         console.error('Invalid WebPush payload', error);
     }
 
-    const title = pushData.title || 'TG2iOS';
+    const senderName = pushData.data && pushData.data.sender_name
+        ? String(pushData.data.sender_name).trim()
+        : '';
+    const messageText = pushData.data && pushData.data.message
+        ? String(pushData.data.message).trim()
+        : '';
+    const title = senderName || pushData.title || 'Telegram';
     const options = {
-        body: pushData.body || 'Новое уведомление',
+        body: messageText || pushData.body || 'Новое уведомление',
         data: pushData.data || {},
+        icon: pushData.icon || './telegram-icon.svg',
+        badge: pushData.badge || './telegram-icon.svg',
         tag: pushData.tag || 'tg2ios-notifier',
     };
 

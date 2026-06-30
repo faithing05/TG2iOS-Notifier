@@ -167,8 +167,8 @@ def describe_error(error: Exception) -> str:
 
 
 def build_webpush_payload(contact_name: str, message_content: str, is_test: bool = False) -> str:
-    body = f"Сообщение от: {contact_name}"
-    title = "Telegram"
+    title = contact_name
+    body = message_content
     if is_test:
         title = "TG2iOS"
         body = "Тестовое push-уведомление из TG2iOS-Notifier"
@@ -176,6 +176,8 @@ def build_webpush_payload(contact_name: str, message_content: str, is_test: bool
     payload = {
         "title": title,
         "body": body,
+        "icon": "./telegram-icon.svg",
+        "badge": "./telegram-icon.svg",
         "tag": "tg2ios-notifier",
         "data": {
             "sender_name": contact_name,

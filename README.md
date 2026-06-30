@@ -39,7 +39,7 @@ python desktop_app.py
 1. Откройте вкладку `Настройки`.
 2. Заполните `TG API ID` и `TG API Hash`.
 3. Скопируйте `VAPID Public Key` из приложения.
-4. Разместите файлы `index.html`, `frontend.js`, `manifest.json` и `serviceworker.js` из корня проекта на HTTPS-хостинге, например GitHub Pages.
+4. Разместите файлы `index.html`, `frontend.js`, `manifest.json`, `serviceworker.js` и `telegram-icon.svg` из корня проекта на HTTPS-хостинге, например GitHub Pages.
 5. Откройте страницу на iPhone через Safari и добавьте ее на экран `Домой`.
 6. Запустите PWA с домашнего экрана.
 7. Вставьте `VAPID Public Key` в поле на странице и нажмите `Subscribe`.
@@ -94,6 +94,42 @@ build_app.bat
 ```bash
 pyinstaller --clean --onefile --noconsole --name TgIosNotifier desktop_app.py
 ```
+
+## Деплой PWA в отдельный репозиторий
+
+Если сайт хостится из другого git-репозитория, используйте локальный скрипт синхронизации:
+
+```bash
+deploy_pwa.bat
+```
+
+Скрипт копирует в репозиторий сайта файлы:
+
+- `index.html`
+- `frontend.js`
+- `manifest.json`
+- `serviceworker.js`
+- `telegram-icon.svg`
+
+По умолчанию скрипт ищет сайт-репозиторий в соседней папке `..\TG-notification`.
+
+Если репозиторий лежит в другом месте, можно:
+
+1. Передать путь вручную:
+
+```bash
+deploy_pwa.bat -TargetRepoPath "F:\Desktop\TG-notification"
+```
+
+2. Один раз задать переменную окружения `TG_NOTIFICATION_REPO`.
+
+Полезные режимы:
+
+- только проверить, что будет обновлено: `deploy_pwa.bat -DryRun`
+- скопировать без коммита и push: `deploy_pwa.bat -NoCommit`
+- создать коммит без push: `deploy_pwa.bat -NoPush`
+
+После любых изменений в `index.html`, `frontend.js`, `manifest.json`, `serviceworker.js` или `telegram-icon.svg` нужно запускать этот скрипт, иначе GitHub Pages останется на старой версии.
 
 ## Хранение файлов
 
