@@ -44,6 +44,7 @@ PWA / Website:
 - `manifest.json`: PWA name, icon, install metadata
 - `serviceworker.js`: push handling and notification display
 - `telegram-icon.svg`: icon for PWA / push
+- `version.json`: visible site version shown in the PWA page; generated on deploy in the Pages repo
 
 Other:
 
@@ -104,6 +105,8 @@ deploy_pwa.bat -TargetRepoPath "F:\Desktop\TG-notification"
 The live Pages repo is:
 
 - `https://github.com/faithing05/TG-notification`
+
+The deploy script also regenerates `version.json` in the Pages repo so the page shows the currently deployed version.
 
 ## Common Change Map
 

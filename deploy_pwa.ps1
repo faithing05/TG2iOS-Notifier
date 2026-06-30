@@ -34,6 +34,8 @@ $filesToCopy = @(
     'telegram-icon.svg'
 )
 
+$trackedFiles = $filesToCopy + 'version.json'
+
 Write-Host "Syncing PWA files to $resolvedTarget"
 
 foreach ($relativePath in $filesToCopy) {
@@ -58,11 +60,28 @@ if ($DryRun) {
     exit 0
 }
 
-$statusOutput = git -C $resolvedTarget status --short -- @filesToCopy
-if (-not $statusOutput) {
+$contentStatus = git -C $resolvedTarget status --short -- @filesToCopy
+if (-not $contentStatus) {
     Write-Host 'No changes to commit.'
     exit 0
 }
+
+$sourceCommit = (git -C $sourceRoot rev-parse --short HEAD 2>$null)
+if (-not $sourceCommit) {
+    $sourceCommit = 'no-git'
+}
+
+$versionStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$versionTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC')
+$versionData = [ordered]@{
+    version = "$versionStamp-$sourceCommit"
+    updated_at = $versionTime
+}
+$versionJson = $versionData | ConvertTo-Json
+$versionTargetPath = Join-Path $resolvedTarget 'version.json'
+[System.IO.File]::WriteAllText($versionTargetPath, $versionJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+
+$statusOutput = git -C $resolvedTarget status --short -- @trackedFiles
 
 Write-Host ''
 Write-Host 'Changes:'
@@ -74,7 +93,7 @@ if ($NoCommit) {
     exit 0
 }
 
-git -C $resolvedTarget add -- $filesToCopy
+git -C $resolvedTarget add -- $trackedFiles
 
 $postAddStatus = git -C $resolvedTarget diff --cached --name-only
 if (-not $postAddStatus) {
